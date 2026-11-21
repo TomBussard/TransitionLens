@@ -1,13 +1,4 @@
-"""Étape B — signaux, calculés uniquement avec l'information disponible à la date de décision.
-
-Conventions :
-  * Les multiples sont inversés en rendements (E/P, B/P, S/P, CF/P) : un rendement élevé = titre « bon marché ».
-    Les bénéfices négatifs restent négatifs dans E/P (aucune exclusion implicite, aucun zéro imputé).
-  * Les comparaisons se font en rangs centiles À L'INTÉRIEUR du groupe d'industrie (repli : secteur GICS
-    si le groupe compte moins de `taille_min` observations), pour neutraliser les différences sectorielles.
-  * Un score composite est une moyenne de rangs centiles ; la moyenne ignore les composantes manquantes
-    mais exige au moins `min_comp` composantes disponibles.
-"""
+"""Signals use the observations available on the decision date. Valuation multiples are expressed as yields and a negative earnings yield stays negative. Industry percentile ranks make firms with different business models easier to compare."""
 from __future__ import annotations
 
 import numpy as np
@@ -20,7 +11,7 @@ def winsor(s: pd.Series, p: float = 0.01) -> pd.Series:
 
 
 def rang_pairs(u: pd.DataFrame, x: pd.Series, taille_min: int = 8) -> pd.Series:
-    """Rang centile (0-1] dans le groupe d'industrie, repli sur le secteur GICS."""
+    """Rank each stock against its industry peers, falling back to its sector for small groups."""
     d = pd.DataFrame({"x": x, "g": u["industry_group"], "s": u["gics_sector_name"]})
     n_g = d.groupby("g")["x"].transform(lambda v: v.notna().sum())
     r_g = d.groupby("g")["x"].rank(pct=True)
@@ -34,9 +25,9 @@ def composite(rangs: pd.DataFrame, min_comp: int = 3) -> pd.Series:
 
 
 def valorisation(u: pd.DataFrame) -> pd.DataFrame:
-    """Rendements de valorisation au 31/12/2024 (fichier imposé) et score Value relatif aux pairs."""
+    """Calculate valuation yields and a peer-relative value score from the dated input snapshot."""
     v = pd.DataFrame(index=u.index)
-    v["EP"] = u["Net margin"] / (100.0 * u["PS ratio"])         # E/P reconstitué (couvre les pertes)
+    v["EP"] = u["Net margin"] / (100.0 * u["PS ratio"])         # Net margin keeps loss-making firms in the earnings yield.
     v["BP"] = 1.0 / u["PB ratio"].where(u["PB ratio"] > 0)
     v["SP"] = 1.0 / u["PS ratio"].where(u["PS ratio"] > 0)
     v["CFP"] = 1.0 / u["PCF ratio"].where(u["PCF ratio"] > 0)
@@ -65,37 +56,35 @@ def qualite(u: pd.DataFrame) -> pd.DataFrame:
 
 
 def vert(u: pd.DataFrame) -> pd.DataFrame:
-    """Indicateurs environnementaux NON agrégés + un score composite documenté (rangs)."""
+    """Return the separate environmental measures alongside their equal-weight percentile score."""
     g = pd.DataFrame(index=u.index)
     g["CT"] = u["CT_TOTAL_MAX_REV"] / 100.0
     g["TAX_EST"] = u["EST_EU_TAXONOMY_MAX_REV"] / 100.0
     g["INTENSITE_S12"] = u["INTENSITY_SCOPE_1"] + u["INTENSITY_SCOPE_2"]
-    g["rg_efficacite_carbone"] = rang_pairs(u, -g["INTENSITE_S12"])     # 1 = moins intensif du groupe
+    g["rg_efficacite_carbone"] = rang_pairs(u, -g["INTENSITE_S12"])     # The least carbon-intensive peer receives the highest rank.
     g["PILIER_E"] = u["ENVIRONMENTAL_PILLAR_SCORE"]
-    # Score vert composite (classement des titres déjà éligibles uniquement) :
-    # moyenne des rangs centiles univers de la part CT et de l'efficacité carbone intra-groupe (poids égaux).
+    # Give clean-tech revenue and carbon efficiency the same weight.
+
     g["score_vert"] = pd.concat([g["CT"].rank(pct=True), g["rg_efficacite_carbone"]], axis=1).mean(axis=1)
     return g
 
 
 def avantage_cout_carbone(u: pd.DataFrame, prix_carbone: float = 65.0) -> pd.DataFrame:
-    """Méthode C (approximation) : coût carbone évité vs la médiane des pairs, rapporté à l'EV.
+    """Estimate the annual cost difference from a company's industry median.
 
-    avantage (M EUR/an) = (intensité médiane des pairs - intensité propre) [tCO2e/M EUR] x CA [M EUR] x prix [EUR/t] / 1e6
-    Hypothèses fortes : toutes les émissions scopes 1+2 seraient tarifées au prix indiqué, sans quotas gratuits,
-    à production inchangée. Potentiel théorique, PAS un bénéfice réalisé ni une économie documentée.
-    """
+    The scenario prices all Scope 1 and Scope 2 emissions and holds production fixed.
+    Revenue and enterprise value are in millions of euros. The result is a modelled sensitivity."""
     i = u["INTENSITY_SCOPE_1"] + u["INTENSITY_SCOPE_2"]
     med = i.groupby(u["industry_group"]).transform("median")
-    tonnes_evitees = (med - i) * u["SALES"]                  # tCO2e/an (M EUR x t/M EUR)
-    avantage_meur = tonnes_evitees * prix_carbone / 1e6       # M EUR/an
+    tonnes_evitees = (med - i) * u["SALES"]                  # Tonnes per year
+    avantage_meur = tonnes_evitees * prix_carbone / 1e6       # Millions of euros per year
     out = pd.DataFrame({"tonnes_evitees_vs_pairs": tonnes_evitees, "avantage_carbone_MEUR": avantage_meur,
                         "rendement_avantage_carbone": avantage_meur / u["EV"].where(u["EV"] > 0)}, index=u.index)
     return out
 
 
 def momentum_12_1(r_m: pd.DataFrame, date: str) -> pd.Series:
-    """Rendement cumulé de t-12 à t-1 mois (mois t exclu), à partir de rendements mensuels."""
+    """Compound monthly returns over the prior window, leaving out the most recent month."""
     r = r_m.loc[:pd.Timestamp(date)]
     fen = r.iloc[-12:-1]
     ok = fen.notna().sum() >= 10

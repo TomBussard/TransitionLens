@@ -1,9 +1,4 @@
-"""Construction des portefeuilles candidats et pondérations.
-
-Ratio de diversification OPCVM (art. R214-21 CMF / directive OPCVM art. 52) : 5 % par émetteur,
-porté à 10 % à condition que la somme des lignes > 5 % n'excède pas 40 %. Conséquence : un
-portefeuille entièrement investi en actions exige au moins 16 émetteurs (4 x 10 % + 12 x 5 %).
-"""
+"""Build long-only portfolios under the study's 5/10/40 concentration limits. With the default settings, full investment needs at least sixteen issuers."""
 from __future__ import annotations
 
 import numpy as np
@@ -12,11 +7,9 @@ import pandas as pd
 
 def plafonner(w: pd.Series, cap: float = 0.05, cap_derog: float = 0.10, somme_max: float = 0.40,
               tol: float = 1e-12) -> tuple[pd.Series, bool]:
-    """Pondérations respectant 5/10/40 par redistribution proportionnelle itérative.
+    """Redistribute excess weight until the limits are satisfied.
 
-    Renvoie (pondérations, conforme). Si n < 16, la conformité est impossible à pleine exposition :
-    on applique un plafond uniforme 1/n et conforme = False (signalé, jamais masqué).
-    """
+    The second return value flags feasibility. When there are too few issuers, the fallback is equal weight."""
     w = w[w > 0].astype(float)
     w = w / w.sum()
     n = len(w)
@@ -31,11 +24,11 @@ def plafonner(w: pd.Series, cap: float = 0.05, cap_derog: float = 0.10, somme_ma
             libres = w < cap - tol
             w[libres] += exc.sum() * w[libres] / w[libres].sum()
         return w / w.sum(), bool((w <= cap + 1e-9).all())
-    # 16 <= n < 20 : quatre lignes au plus à 10 %, le reste à 5 %
+    # With fewer than 20 names, some positions need the higher limit.
     k = int(np.floor(somme_max / cap_derog))
     if k * cap_derog + (n - k) * cap >= 1 - tol:
-        # Tri STABLE : à poids égaux, l'ordre d'entrée décide (univers trié par poids MSCI décroissant :
-        # les plus grandes capitalisations, plus liquides, reçoivent les lignes à 10 %). Déterministe.
+        # Keep incoming order when two reference weights tie.
+
         ordre = w.sort_values(ascending=False, kind="stable").index
         plafonds = pd.Series(cap, index=w.index)
         plafonds[ordre[:k]] = cap_derog
@@ -53,7 +46,7 @@ def plafonner(w: pd.Series, cap: float = 0.05, cap_derog: float = 0.10, somme_ma
 
 
 def equipondere(ids) -> pd.Series:
-    ids = list(dict.fromkeys(ids))  # déduplication (une société n'est jamais comptée deux fois)
+    ids = list(dict.fromkeys(ids))  # Count each company once.
     return pd.Series(1.0 / len(ids), index=ids) if ids else pd.Series(dtype=float)
 
 
