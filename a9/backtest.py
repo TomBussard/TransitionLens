@@ -1,4 +1,5 @@
 """Backtest a long-only EUR portfolio. Weights drift between rebalances. Turnover counts buys and sells, and unquoted holdings transfer to cash after their last observation."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -13,15 +14,23 @@ def dates_rebal(index: pd.DatetimeIndex, freq: str) -> set:
     return set(fins.iloc[:-1])  # There is no following holding period after the last date.
 
 
-def simuler(cibles: pd.Series, r: pd.DataFrame, freq: str = "Q", cout_bps: float = 15.0,
-            frais_annuels: float = 0.0, cout_initial: bool = True) -> dict:
+def simuler(
+    cibles: pd.Series,
+    r: pd.DataFrame,
+    freq: str = "Q",
+    cout_bps: float = 15.0,
+    frais_annuels: float = 0.0,
+    cout_initial: bool = True,
+) -> dict:
     """Calculate daily gross and net returns and turnover at each rebalance.
 
     Rows in the returns table are dates. An occasional missing quote carries the last price forward."""
     cibles = cibles[cibles > 0]
     titres = [t for t in cibles.index if t in r.columns]
     if r.index.empty or not titres:
-        raise ValueError("Supply at least one date and one positively weighted asset with a return column.")
+        raise ValueError(
+            "Supply at least one date and one positively weighted asset with a return column."
+        )
     cibles = cibles[titres] / cibles[titres].sum()
     R = r[titres]
     # After the final quote, keep the position in cash until the next rebalance.
@@ -53,7 +62,9 @@ def simuler(cibles: pd.Series, r: pd.DataFrame, freq: str = "Q", cout_bps: float
             tot = float(w.sum() + cash)
             w_now = (w / tot).reindex(cib.index).fillna(0.0)
             # Reinvesting cash is already included on the buy side.
-            delta = (cib - w_now).abs().sum() + (w / tot).drop(index=cib.index, errors="ignore").abs().sum()
+            delta = (cib - w_now).abs().sum() + (w / tot).drop(
+                index=cib.index, errors="ignore"
+            ).abs().sum()
             rot[t] = float(delta)
             w = cib.reindex(w.index).fillna(0.0) * tot
             # If every holding has stopped trading, the proceeds stay in cash.

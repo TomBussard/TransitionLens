@@ -1,48 +1,56 @@
 """Build long-only portfolios under the study's 5/10/40 concentration limits. With the default settings, full investment needs at least sixteen issuers."""
+
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
 
-def plafonner(w: pd.Series, cap: float = 0.05, cap_derog: float = 0.10, somme_max: float = 0.40,
-              tol: float = 1e-12) -> tuple[pd.Series, bool]:
+def plafonner(
+    w: pd.Series,
+    cap: float = 0.05,
+    cap_derog: float = 0.10,
+    somme_max: float = 0.40,
+    tol: float = 1e-12,
+) -> tuple[pd.Series, bool]:
     """Redistribute excess weight until the limits are satisfied.
 
     The second return value flags feasibility. When there are too few issuers, the fallback is equal weight."""
-    w = w[w > 0].astype(float)
-    w = w / w.sum()
-    n = len(w)
-    if n == 0:
-        return w, False
-    if n * cap >= 1 - tol:
-        for _ in range(200):
-            exc = (w - cap).clip(lower=0)
-            if exc.sum() <= tol:
-                break
-            w = w.clip(upper=cap)
-            libres = w < cap - tol
-            w[libres] += exc.sum() * w[libres] / w[libres].sum()
-        return w / w.sum(), bool((w <= cap + 1e-9).all())
-    # With fewer than 20 names, some positions need the higher limit.
-    k = int(np.floor(somme_max / cap_derog))
-    if k * cap_derog + (n - k) * cap >= 1 - tol:
-        # Keep incoming order when two reference weights tie.
+    if not 0 < cap <= cap_derog <= 1 or not 0 <= somme_max <= 1:
+        raise ValueError(
+            "Use positive position limits and an aggregate allowance between zero and one."
+        )
+    weights = w.dropna().astype(float)
+    if not np.isfinite(weights).all() or not weights.index.is_unique:
+        raise ValueError("Supply one finite starting weight per issuer.")
+    weights = weights[weights > 0]
+    if weights.empty:
+        return weights, False
+    weights = weights / weights.sum()
+    limits = pd.Series(cap, index=weights.index)
+    if limits.sum() < 1 - tol:
+        # A stable sort gives the same allowance to the same issuer when two weights tie.
+        slots = int(np.floor((somme_max + tol) / cap_derog))
+        largest = weights.sort_values(ascending=False, kind="stable").head(slots).index
+        limits.loc[largest] = cap_derog
+    if limits.sum() < 1 - tol:
+        return pd.Series(1 / len(weights), index=weights.index), False
 
-        ordre = w.sort_values(ascending=False, kind="stable").index
-        plafonds = pd.Series(cap, index=w.index)
-        plafonds[ordre[:k]] = cap_derog
-        for _ in range(200):
-            exc = (w - plafonds).clip(lower=0)
-            if exc.sum() <= tol:
-                break
-            w = np.minimum(w, plafonds)
-            libres = w < plafonds - tol
-            w[libres] += exc.sum() * w[libres] / w[libres].sum()
-        w = w / w.sum()
-        conf = bool((w <= plafonds + 1e-9).all() and w[w > cap + 1e-9].sum() <= somme_max + 1e-9)
-        return w, conf
-    return pd.Series(1.0 / n, index=w.index), False
+    # Each pass fixes at least one issuer at its cap. Redistribute the rest in the original proportions.
+    result = pd.Series(0.0, index=weights.index)
+    remaining = weights.index
+    while len(remaining):
+        free = weights.loc[remaining]
+        proposed = (1 - result.sum()) * free / free.sum()
+        above = proposed > limits.loc[remaining] + tol
+        if not above.any():
+            result.loc[remaining] = proposed
+            break
+        fixed = above.index[above]
+        result.loc[fixed] = limits.loc[fixed]
+        remaining = above.index[~above]
+    meets_limits = result[result > cap + tol].sum() <= somme_max + tol
+    return result, bool(meets_limits)
 
 
 def equipondere(ids) -> pd.Series:
