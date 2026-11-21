@@ -21,7 +21,25 @@ At EUR 65 per tonne, 24 of the 80 companies entered the portfolio and the larges
 | Equity signal | Convert the annual cost advantage to EUR millions and divide by enterprise value | Fraction of enterprise value |
 | Holding period | Let weights move with daily returns, then trade back to the targets at quarter end | Gross and net daily return |
 
-The sample has four industry groups with 20 companies each. The top 30% of scores enter the portfolio. I redistribute excess starting weight among issuers with room under the size limit. The example charges 15 basis points on the sum of absolute purchases and sales, including the initial investment. A temporary missing quote holds the previous valuation. After a company's final quote its position is held in cash until the next rebalance.
+### One company's score
+
+Let $I_i$ be combined Scope 1 and Scope 2 intensity in tonnes per EUR million of sales, $M_g$ the median in the same industry, $S_i$ annual sales and $EV_i$ positive enterprise value, both in EUR millions. At a carbon price $p$ in EUR per tonne the model holds production fixed.
+
+```math
+A_i=\frac{(M_g-I_i)S_i p}{10^6},\qquad s_i=\frac{A_i}{EV_i}
+```
+
+In the seeded run, **Company 70** has an intensity of **68.06** against a transport-sector median of **99.29**. Applied to EUR 10,757.13 million of sales, the unrounded gap represents 335,956 tonnes. At EUR 65 per tonne that gives **EUR 21.84 million** a year, or **0.640%** of its EUR 3,412.85 million enterprise value. This is the highest score in the sample. A company above its peer median receives a negative score.
+
+### From a score to a position
+
+There are four industries with 20 companies each. I rank all 80 scores, take the top 30% and weight those companies by enterprise value. I redistribute excess weight among issuers with room below the 5% cap. Between quarter ends the weights drift with the simulated daily returns. At a rebalance, let $w_i^-$ be the weight after the market move and $w_i^*$ the target.
+
+```math
+\tau_t=\sum_i |w_i^*-w_i^-|,\qquad r_t^{\mathrm{net}}=r_t^{\mathrm{gross}}-0.0015\,\tau_t
+```
+
+Buying 1% and selling 1% counts as 2% traded. The first rebalance trades 6.57% of the portfolio, costing roughly **0.99 basis points**. The initial investment incurs a separate 15 basis point charge. Compounding the net daily returns gives the **8.03%** shown above. The demonstration generates stock returns independently of the emissions inputs, so the path illustrates portfolio construction and costs. [Score calculation](a9/signaux.py) · [Weight caps](a9/portefeuilles.py) · [Backtest](a9/backtest.py)
 
 Try running the example again with zero costs. The constituents and gross return should agree with the original run, and the net path should match the gross path. Multiplying a positive carbon price by two doubles the signal in this linear scenario and preserves its ranking.
 
@@ -29,7 +47,7 @@ Try running the example again with zero costs. The constituents and gross return
 python example.py --carbon-price 65 --cost-bps 0
 ```
 
-[Signal and units](a9/signaux.py) · [Weight caps](a9/portefeuilles.py) · [Trading and cash rules](a9/backtest.py)
+A missing daily quote carries the previous valuation. After a company's final quote its position is held in cash until the next rebalance.
 
 ## Run it
 
