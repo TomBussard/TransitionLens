@@ -2,6 +2,12 @@
 
 How much does an emissions advantage matter once it is scaled by enterprise value? This public edition of a sustainable equity research project follows one carbon-price assumption through stock selection, portfolio weights and trading costs.
 
+## Research toolkit
+
+The public example follows a carbon-price signal end to end. The underlying library also takes dated company fundamentals, ranks value and quality against peers, separates clean-technology revenue from emissions efficiency, and computes momentum from a monthly return panel. Those additional factors can be inspected individually or used as inputs to a new selection. The default carbon portfolio uses the carbon score.
+
+Starting from a score, you can select either tail of its distribution, compare equal weights with capped reference weights, and test quarterly rebalancing, annual rebalancing or buy and hold. The simulator returns a daily gross series, a net series and the turnover ledger. Weekly and monthly returns are compounded from those daily observations. [Signal library](a9/signaux.py) · [Portfolio rules](a9/portefeuilles.py) · [Return simulation](a9/backtest.py)
+
 ## The experiment
 
 The signal compares a company's combined Scope 1 and Scope 2 emissions intensity with its industry median. The model multiplies the difference by revenue and a hypothetical carbon price, then scales it by enterprise value. The result measures sensitivity to that assumption. Its interpretation depends on the assumed carbon price and the emissions covered.
@@ -48,6 +54,44 @@ python example.py --carbon-price 65 --cost-bps 0
 ```
 
 A missing daily quote carries the previous valuation. After a company's final quote its position is held in cash until the next rebalance.
+
+## Building the other research signals
+
+For a value score I construct five yields. Earnings yield uses net margin and the price-to-sales ratio, which preserves the sign of earnings for a loss-making firm. I also use book-to-price, sales-to-price, cash-flow-to-price and the reported free-cash-flow yield. If $m_i$ is net margin in percent, the first two yields are
+
+```math
+E_i/P_i=\frac{m_i/100}{(P/S)_i},\qquad B_i/P_i=\frac{1}{(P/B)_i}.
+```
+
+Each available yield becomes a percentile within its industry. A group with fewer than eight usable observations falls back to its sector. The composite averages the available ranks when at least three are present. Quality uses the same approach for return on invested capital, return on equity, net margin and the negative of debt to assets.
+
+```math
+s_i^{\rm value}=\frac{1}{|J_i|}\sum_{j\in J_i}\mathrm{rank}_{\rm peer}(x_{ij}),\qquad |J_i|\ge3.
+```
+
+The green score averages the universe percentile of clean-technology revenue share and the peer percentile of negative carbon intensity when both are present. The momentum function looks back over eleven monthly returns and skips the latest month. It requires at least ten observations in that window.
+
+```math
+M_{i,t}=\prod_{j=1}^{11}(1+r_{i,t-j})-1.
+```
+
+### What the cap and cost rules change
+
+The weighting function first tries a 5% limit for every issuer. If that cannot fully invest the portfolio, it can give up to four of the largest reference holdings a 10% limit. Holdings above 5% may total at most 40%. With monotonically decreasing reference weights, I reran the routine on **20, 16 and 15 issuers**. With 20 it returned 5% each. With 16, four issuers carried a combined 40% and the other twelve held 5% each. With 15 the routine marked the basket infeasible.
+
+```math
+\sum_i w_i=1,\qquad \max_i w_i\le0.10,\qquad \sum_{i:\,w_i>0.05}w_i\le0.40.
+```
+
+I kept the carbon universe, seed and trade dates fixed and changed only the charge per unit traded. Aggregate turnover was **119.99%**, including the 100% initial investment.
+
+| Cost per unit traded | Gross return | Net return |
+| --- | ---: | ---: |
+| 0 basis points | 8.2254% | 8.2254% |
+| 15 basis points | 8.2254% | 8.0308% |
+| 50 basis points | 8.2254% | 7.5773% |
+
+The three runs hold the same names. The final difference depends on both turnover and the dates when costs leave the compounding path. Use `--cost-bps 0`, `15` or `50` with the command below to reproduce the rows. [Cap implementation](a9/portefeuilles.py) · [Experiment](example.py)
 
 ## Run it
 
